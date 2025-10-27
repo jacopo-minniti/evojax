@@ -5,6 +5,7 @@ import json
 import numpy as np
 from evojax.policy import MLPPolicy
 from evojax.policy.convnet import ConvNetPolicy
+from evojax.policy.neat import NEATPolicy
 
 
 def setup_problem(config, logger):
@@ -20,6 +21,8 @@ def setup_problem(config, logger):
         return setup_waterworld(config)
     elif config["problem_type"] == "waterworld_ma":
         return setup_waterworld_ma(config)
+    elif config["problem_type"] == "slimevolley":
+        return setup_slimevolley(config)
 
 
 def setup_cartpole(config, hard=False):
@@ -90,6 +93,37 @@ def setup_waterworld_ma(config, num_agents=16, max_steps=500):
         output_dim=train_task.act_shape[-1],
         output_act_fn="softmax",
     )
+    return train_task, test_task, policy
+
+
+def setup_slimevolley(config, max_steps: int = 3000):
+    from evojax.task.slimevolley import SlimeVolley
+
+    train_task = SlimeVolley(test=False, max_steps=max_steps)
+    test_task = SlimeVolley(test=True, max_steps=max_steps)
+
+    if config["es_name"] == "NEAT":
+        max_hidden = config.get("max_hidden_nodes", 32)
+        propagation_steps = config.get("propagation_steps")
+        policy = NEATPolicy(
+            input_dim=train_task.obs_shape[0],
+            output_dim=train_task.act_shape[0],
+            max_hidden_nodes=max_hidden,
+            propagation_steps=propagation_steps,
+        )
+        es_cfg = config.setdefault("es_config", {})
+        es_cfg.setdefault("pop_size", config.get("pop_size", 128))
+        es_cfg.setdefault("n_input", policy.input_dim)
+        es_cfg.setdefault("n_output", policy.output_dim)
+        es_cfg.setdefault("max_hidden_nodes", max_hidden)
+        es_cfg.setdefault("activation_choices", [1, 5, 9])
+    else:
+        policy = MLPPolicy(
+            input_dim=train_task.obs_shape[0],
+            hidden_dims=[config["hidden_size"]],
+            output_dim=train_task.act_shape[0],
+            output_act_fn="tanh",
+        )
     return train_task, test_task, policy
 
 
