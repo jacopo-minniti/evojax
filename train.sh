@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=evojax
-#SBATCH --time=01:00:00
+#SBATCH --time=01:30:00
 #SBATCH --gpus-per-node=l40s:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G

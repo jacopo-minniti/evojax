@@ -20,7 +20,7 @@ es_config:
   prob_add_node: 0.03  # Probability of splitting an edge with a new node.
   prob_crossover: 0.4  # Likelihood of mixing two parents versus cloning.
   prob_enable: 0.05  # Chance to re-enable a disabled connection during mutation.
-  prob_mut_conn: 0.05  # Per-connection chance to perturb weights.
+  prob_mut_conn: 0.1  # Per-connection chance to perturb weights.
   prob_mut_act: 0.05  # Probability to resample a hidden node's activation.
   prob_init_enable: 1.0  # Initial probability that sampled edges start enabled.
 
