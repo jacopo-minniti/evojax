@@ -17,8 +17,70 @@ import numpy as np
 from PIL import Image
 
 from evojax.obs_norm import ObsNormalizer
-from scripts.benchmarks.problems import load_yaml, setup_problem
 from evojax.task.slimevolley import SlimeVolley
+
+############################
+# from scripts.benchmarks.problems import load_yaml, setup_problem
+import yaml
+import re
+from evojax.policy import MLPPolicy
+from evojax.policy.neat import NEATPolicy
+def load_yaml(config_fname: str) -> dict:
+    """Load in YAML config file."""
+    loader = yaml.SafeLoader
+    loader.add_implicit_resolver(
+        "tag:yaml.org,2002:float",
+        re.compile(
+            """^(?:
+        [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |\\.[0-9_]+(?:[eE][-+][0-9]+)?
+        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
+        |[-+]?\\.(?:inf|Inf|INF)
+        |\\.(?:nan|NaN|NAN))$""",
+            re.X,
+        ),
+        list("-+0123456789."),
+    )
+    with open(config_fname) as file:
+        yaml_config = yaml.load(file, Loader=loader)
+    return yaml_config
+
+
+def setup_slimevolley(config, max_steps: int = 3000):
+    from evojax.task.slimevolley import SlimeVolley
+
+    train_task = SlimeVolley(test=False, max_steps=max_steps)
+    test_task = SlimeVolley(test=True, max_steps=max_steps)
+
+    if config["es_name"] == "NEAT":
+        max_hidden = config.get("max_hidden_nodes", 32)
+        propagation_steps = config.get("propagation_steps")
+        policy = NEATPolicy(
+            input_dim=train_task.obs_shape[0],
+            output_dim=train_task.act_shape[0],
+            max_hidden_nodes=max_hidden,
+            propagation_steps=propagation_steps,
+        )
+        es_cfg = config.setdefault("es_config", {})
+        es_cfg.setdefault("pop_size", config.get("pop_size", 128))
+        es_cfg.setdefault("n_input", policy.input_dim)
+        es_cfg.setdefault("n_output", policy.output_dim)
+        es_cfg.setdefault("max_hidden_nodes", max_hidden)
+        es_cfg.setdefault("activation_choices", [1, 5, 9])
+    else:
+        policy = MLPPolicy(
+            input_dim=train_task.obs_shape[0],
+            hidden_dims=[config["hidden_size"]],
+            output_dim=train_task.act_shape[0],
+            output_act_fn="tanh",
+        )
+    return train_task, test_task, policy
+
+def setup_problem(config, logger):
+        return setup_slimevolley(config)
+########################
+
 
 
 def _parse_args() -> argparse.Namespace:
@@ -76,7 +138,7 @@ def _load_model(model_path: Path) -> tuple[jnp.ndarray, Optional[jnp.ndarray]]:
 
 def _select_state(state, index: int = 0):
     """Extract a single environment from a batched task state."""
-    return jax.tree_map(lambda x: np.asarray(jax.device_get(x[index])), state)
+    return jax.tree.map(lambda x: np.asarray(jax.device_get(x[index])), state)
 
 
 def main() -> None:

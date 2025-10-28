@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=evojax
-#SBATCH --time=04:00:00
-#SBATCH --gpus-per-node=h100:1
+#SBATCH --time=00:10:00
+#SBATCH --gpus-per-node=l40s:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=8G
 #SBATCH --output=/scratch/jacopo04/evojax/jobs_logs/evojax-%j.out
@@ -19,4 +19,4 @@ module load gcc opencv arrow
 source .venv/bin/activate
 
 pip install --upgrade "jax[cuda12]"
-python scripts/benchmarks/train.py --config_fname scripts/benchmarks/configs/NEAT/slimevolley.yaml
+python scripts/visualize_slimevolley.py --model-path log/NEAT/slimevolley/default/best.npz
