@@ -70,7 +70,7 @@ def reshape_data_from_pmap(data: jnp.ndarray) -> jnp.ndarray:
 
 @jax.jit
 def merge_state_from_pmap(state: TaskState) -> TaskState:
-    return jax.tree_map(
+    return tree_map(
         lambda x: x.reshape((x.shape[0] * x.shape[1], *x.shape[2:])), state)
 
 

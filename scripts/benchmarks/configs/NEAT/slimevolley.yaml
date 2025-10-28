@@ -1,43 +1,48 @@
 es_name: "NEAT"  # Neuroevolution solver to run.
 problem_type: "slimevolley"  # Target environment (Slime Volley).
+env_name: "greedy"
 
 normalize: false  # Observation normalization switch during rollouts.
-pop_size: 32  # Individuals sampled per solver iteration.
+pop_size: 256  # Individuals sampled per solver iteration.
 max_hidden_nodes: 64  # Upper bound on hidden neurons per genome.
 propagation_steps: 64  # Recurrent propagation passes in decoded networks.
 
 es_config:
-  pop_size: 32  # Evolutionary population size (mirrors top-level pop_size).
+  pop_size: 256  # Evolutionary population size (mirrors top-level pop_size).
   n_input: 12  # Observation dimensionality seen by the policy.
   n_output: 3  # Action dimensions: move left, move right, jump.
+
   max_hidden_nodes: 64  # Hidden-node cap enforced inside the solver.
   # identity, step, sine, gaussian, tanh, sigmoid, negate, abs, relu, cos, square
   activation_choices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
   prob_add_conn: 0.05  # Probability of inserting a new feed-forward edge.
   prob_add_node: 0.03  # Probability of splitting an edge with a new node.
   prob_crossover: 0.4  # Likelihood of mixing two parents versus cloning.
-  prob_enable: 0.1  # Chance to re-enable a disabled connection during mutation.
-  prob_mut_conn: 0.8  # Per-connection chance to perturb weights.
+  prob_enable: 0.05  # Chance to re-enable a disabled connection during mutation.
+  prob_mut_conn: 0.05  # Per-connection chance to perturb weights.
   prob_mut_act: 0.05  # Probability to resample a hidden node's activation.
   prob_init_enable: 1.0  # Initial probability that sampled edges start enabled.
-  select_cull_ratio: 0.1  # Fraction of lowest-fitness genomes removed pre-breeding.
-  select_elite_ratio: 0.2  # Fraction of top genomes copied unchanged to the next gen.
+
+  select_cull_ratio: 0.3  # Fraction of lowest-fitness genomes removed pre-breeding.
+  select_elite_ratio: 0.4  # Fraction of top genomes copied unchanged to the next gen.
   select_tourn_size: 2  # Tournament size used when picking parents.
+
   spec_compat_mod: 0.25  # Step size for adapting species compatibility threshold.
-  spec_drop_off_age: 32  # Generations before removing stagnant species.
+  spec_drop_off_age: 24  # Generations before removing stagnant species.
   spec_target: 4  # Desired number of concurrent species.
-  spec_thresh: 3.0  # Initial compatibility distance threshold.
+  spec_thresh: 2.5  # Initial compatibility distance threshold.
   spec_thresh_min: 1.0  # Lower bound on the compatibility threshold.
   spec_gene_coef: 1.0  # Weight on structural gene differences in compatibility.
   spec_weight_coef: 0.5  # Weight on connection-weight differences in compatibility.
   ann_abs_w_cap: 3.0  # Absolute cap applied when clipping connection weights.
 
-max_iter: 200  # Training iterations to execute before stopping.
+max_iter: 1000  # Training iterations to execute before stopping.
 log_interval: 5  # Iteration cadence for logging training metrics.
 test_interval: 100  # Iteration cadence for evaluation on the test task.
-n_repeats: 16  # Training rollouts averaged per genome evaluation.
+n_repeats: 8  # Training rollouts averaged per genome evaluation.
 num_tests: 100  # Evaluation rollouts when testing the elite genome.
 
 seed: 42  # Random seed used for reproducibility.
-gpu_id: [0]  # Visible GPU indices (empty list means CPU only).
+gpu_id: [0, 1, 2, 3]  # Visible GPU indices (empty list means CPU only).
 debug: false  # Enable verbose logging if true.
