@@ -34,5 +34,5 @@ test_interval: 100
 n_repeats: 16
 num_tests: 100
 seed: 42
-gpu_id: []
+gpu_id: [0]
 debug: false
