@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=evojax
-#SBATCH --time=01:30:00
-#SBATCH --gpus-per-node=l40s:4
+#SBATCH --time=01:00:00
+#SBATCH --gpus-per-node=l40s:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --output=/scratch/jacopo04/evojax/jobs_logs/evojax-%j.out
 #SBATCH --error=/scratch/jacopo04/evojax/jobs_logs/evojax-%j.err
 #SBATCH -D /scratch/jacopo04/evojax
