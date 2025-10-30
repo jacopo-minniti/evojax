@@ -8,11 +8,14 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import jax
 import jax.numpy as jnp
+import jax.nn as jnn
 from jax import random
 import numpy as np
 
 from evojax.util import create_logger
 from evojax.algo.base import NEAlgorithm
+from evojax.policy.neat import NEATPolicy
+from evojax.task.binary_dataset import BinaryClassificationDataset
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +136,8 @@ def get_layers(weight_matrix: np.ndarray) -> np.ndarray:
     return layers - 1.0
 
 
+
+
 # ---------------------------------------------------------------------------
 # Genome and Species data structures.
 # ---------------------------------------------------------------------------
@@ -232,11 +237,7 @@ class Genome:
             if rng.random() < cfg["prob_enable"]:
                 conn.enabled = True
         
-        # 2. add some gaussian noise to the weights (only mutation not about architecture)
-        for conn in self.connections.values():
-            if rng.random() < cfg["prob_mut_conn"]:
-                delta = rng.normal() * cfg["ann_mut_sigma"]
-                conn.weight = float(np.clip(conn.weight + delta, -cfg["ann_abs_w_cap"], cfg["ann_abs_w_cap"]))
+        # 2. weights are trained via backpropagation in NEATBackprop; skip stochastic weight jitters.
         
         # 3. pick random activation function
         hidden_nodes = [node for node in self.nodes.values() if node.node_type == 3]
@@ -454,8 +455,8 @@ self._node_innov.items()},
 # Evolutionary NEAT solver interfacing with EvoJAX.
 # ---------------------------------------------------------------------------
 
-class NEAT(NEAlgorithm):
-    """EvoJAX-compatible NEAT solver."""
+class NEATBackprop(NEAlgorithm):
+    """NEAT variant that trains connection weights via backpropagation."""
 
     def __init__(
         self,
@@ -489,10 +490,19 @@ class NEAT(NEAlgorithm):
         ann_abs_w_cap: float = 5.0,
         ann_mut_sigma: Optional[float] = None,
         init_activation: Optional[int] = None,
+        dataset_type: str = "circle",
+        train_size: int = 200,
+        test_size: int = 200,
+        dataset_noise: float = 0.5,
+        batch_size: int = 32,
+        learning_rate: float = 1e-2,
+        grad_steps: int = 1,
+        propagation_steps: Optional[int] = None,
+        dataset_seed: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
     ):
         if logger is None:
-            self._logger = create_logger("NEAT")
+            self._logger = create_logger("NEATBackprop")
         else:
             self._logger = logger
 
@@ -510,6 +520,26 @@ class NEAT(NEAlgorithm):
             raise ValueError("activation_choices must contain at least one activation id.")
         self._ann_init_act = int(init_activation if init_activation is not None else self._activation_choices[0])
         ann_mut_sigma = ann_abs_w_cap * 0.2 if ann_mut_sigma is None else ann_mut_sigma
+        ds_seed = int(dataset_seed if dataset_seed is not None else (seed + 1))
+        self._dataset = BinaryClassificationDataset(
+            dataset_type=dataset_type,
+            train_size=train_size,
+            test_size=test_size,
+            noise=dataset_noise,
+            seed=ds_seed,
+        )
+        self._dataset_seed = ds_seed
+        self._batch_size = int(batch_size)
+        if self._batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0 for backprop training.")
+        self._learning_rate = float(learning_rate)
+        if self._learning_rate < 0.0:
+            raise ValueError("learning_rate must be non-negative.")
+        self._grad_steps = int(grad_steps)
+        if self._grad_steps < 0:
+            raise ValueError("grad_steps must be non-negative.")
+        self._propagation_steps = propagation_steps
+        self._refresh_dataset_arrays()
 
         self._cfg: Dict[str, Any] = {
             "alg_speciate": alg_speciate,
@@ -551,6 +581,25 @@ class NEAT(NEAlgorithm):
                 f"param_size={self.param_size} does not match required size {computed_param_size} "
                 f"for max_nodes={self._max_nodes}."
             )
+        if self._n_output != 1:
+            raise ValueError("NEATBackprop currently supports binary classification with a single output node.")
+        self._policy = NEATPolicy(
+            input_dim=self._n_input,
+            output_dim=self._n_output,
+            max_hidden_nodes=max_hidden_nodes,
+            propagation_steps=self._propagation_steps,
+        )
+        if self._policy.num_params != self.param_size:
+            raise ValueError(
+                f"NEATPolicy expects param_size={self._policy.num_params}, but received {self.param_size}."
+            )
+        mask = np.zeros(self.param_size, dtype=np.float32)
+        mask[self._weights_slice] = 1.0
+        self._trainable_mask = jnp.asarray(mask)
+        self._forward_fn = self._policy._forward_fn
+        self._last_training_loss: float = float("nan")
+        self._train_accuracy: float = float("nan")
+        self._test_accuracy: float = float("nan")
         self._population: List[Genome] = []
         self._species: List[Species] = []
         self._generation: int = 0
@@ -572,7 +621,7 @@ class NEAT(NEAlgorithm):
             self._speciate()
             self._population = self._reproduce()
             self._generation += 1
-
+        self._train_population()
         encoded = np.stack([self._encode_genome(genome) for genome in self._population], axis=0)
         self._encoded_genomes = jnp.asarray(encoded, dtype=jnp.float32)
         return self._encoded_genomes
@@ -596,9 +645,89 @@ class NEAT(NEAlgorithm):
                 self._best_fitness = float(fit)
                 self._best_genome = genome.clone()
                 self._best_params = jnp.asarray(self._encode_genome(self._best_genome), dtype=jnp.float32)
+        if self._best_genome is not None:
+            params = jnp.asarray(self._encode_genome(self._best_genome), dtype=jnp.float32)
+            self._train_accuracy = self._compute_accuracy(params, self._train_inputs, self._train_labels)
+            self._test_accuracy = self._compute_accuracy(params, self._test_inputs, self._test_labels)
+
+    def _train_population(self) -> None:
+        if (
+            self._grad_steps == 0
+            or self._learning_rate == 0.0
+            or self._dataset.train_length() == 0
+            or not self._population
+        ):
+            return
+        losses: List[float] = []
+        cap = float(self._cfg["ann_abs_w_cap"])
+        for idx, genome in enumerate(self._population):
+            params = jnp.asarray(self._encode_genome(genome), dtype=jnp.float32)
+            last_loss = jnp.nan
+            for _ in range(self._grad_steps):
+                batch_x, batch_y = self._sample_batch()
+                loss_fn = lambda p: self._loss_fn(p, batch_x, batch_y)
+                loss, grad = jax.value_and_grad(loss_fn)(params)
+                params = params - self._learning_rate * grad * self._trainable_mask
+                clipped = jnp.clip(params[self._weights_slice], -cap, cap)
+                params = params.at[self._weights_slice].set(clipped)
+                params = params.at[self._gene_weights_slice].set(clipped)
+                last_loss = loss
+            if jnp.isnan(last_loss):
+                loss_value = float("nan")
+            else:
+                loss_value = float(last_loss)
+            losses.append(loss_value)
+            updated = self._decode_params(np.asarray(params, dtype=np.float32))
+            updated.fitness = genome.fitness
+            updated.rank = genome.rank
+            updated.birth = genome.birth
+            updated.species = genome.species
+            self._population[idx] = updated
+        if losses:
+            finite_losses = [val for val in losses if not np.isnan(val)]
+            self._last_training_loss = float(np.mean(finite_losses)) if finite_losses else float("nan")
+        else:
+            self._last_training_loss = float("nan")
+
+    def _sample_batch(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        batch_x_np, batch_y_np = self._dataset.sample_batch(self._batch_size)
+        return jnp.asarray(batch_x_np, dtype=jnp.float32), jnp.asarray(batch_y_np, dtype=jnp.float32)
+
+    def _forward_batch(self, params: jnp.ndarray, inputs: jnp.ndarray) -> jnp.ndarray:
+        if inputs.size == 0:
+            return jnp.zeros((0, self._n_output), dtype=jnp.float32)
+        params_batch = jnp.broadcast_to(params, (inputs.shape[0], params.shape[0]))
+        return self._forward_fn(params_batch, inputs.astype(jnp.float32))
+
+    def _loss_fn(self, params: jnp.ndarray, inputs: jnp.ndarray, targets: jnp.ndarray) -> jnp.ndarray:
+        logits = self._forward_batch(params, inputs).reshape(-1)
+        targets = targets.reshape(-1)
+        positive_term = jnp.maximum(logits, 0.0) - logits * targets
+        loss = positive_term + jnp.log1p(jnp.exp(-jnp.abs(logits)))
+        return jnp.mean(loss)
+
+    def _compute_accuracy(self, params: jnp.ndarray, inputs: jnp.ndarray, targets: jnp.ndarray) -> float:
+        if inputs.size == 0:
+            return float("nan")
+        logits = self._forward_batch(params, inputs).reshape(-1)
+        probs = jnn.sigmoid(logits)
+        preds = jnp.where(probs >= 0.5, 1.0, 0.0)
+        targets = targets.reshape(-1)
+        accuracy = jnp.mean((preds == targets).astype(jnp.float32))
+        return float(accuracy)
+
+    def _refresh_dataset_arrays(self) -> None:
+        self._train_inputs_np = self._dataset.train_inputs.astype(np.float32, copy=True)
+        self._train_labels_np = self._dataset.train_labels.astype(np.float32, copy=True)
+        self._test_inputs_np = self._dataset.test_inputs.astype(np.float32, copy=True)
+        self._test_labels_np = self._dataset.test_labels.astype(np.float32, copy=True)
+        self._train_inputs = jnp.asarray(self._train_inputs_np)
+        self._train_labels = jnp.asarray(self._train_labels_np)
+        self._test_inputs = jnp.asarray(self._test_inputs_np)
+        self._test_labels = jnp.asarray(self._test_labels_np)
 
     def save_state(self) -> Dict[str, Any]:
-        return {
+        state = {
             "population": [genome.to_state() for genome in self._population],
             "best_fitness": self._best_fitness,
             "best_genome": self._best_genome.to_state() if self._best_genome else None,
@@ -608,10 +737,26 @@ class NEAT(NEAlgorithm):
             "innovation": self._innovation.to_state(),
             "rng_key": np.asarray(self._key),
         }
+        state["backprop"] = {
+            "dataset": self._dataset.state_dict(),
+            "train_loss": float(self._last_training_loss) if not np.isnan(self._last_training_loss) else float("nan"),
+            "train_accuracy": float(self._train_accuracy) if not np.isnan(self._train_accuracy) else float("nan"),
+            "test_accuracy": float(self._test_accuracy) if not np.isnan(self._test_accuracy) else float("nan"),
+        }
+        return state
 
     def load_state(self, saved_state: Dict[str, Any]) -> None:
         if saved_state is None:
             return
+        backprop_state = saved_state.get("backprop")
+        if backprop_state is not None:
+            dataset_state = backprop_state.get("dataset")
+            if dataset_state is not None:
+                self._dataset.load_state_dict(dataset_state)
+                self._refresh_dataset_arrays()
+            self._last_training_loss = float(backprop_state.get("train_loss", float("nan")))
+            self._train_accuracy = float(backprop_state.get("train_accuracy", float("nan")))
+            self._test_accuracy = float(backprop_state.get("test_accuracy", float("nan")))
         self._population = [
             Genome.from_state(state, self._n_input, self._n_output) for state in saved_state.get("population", [])
         ]
@@ -635,7 +780,11 @@ class NEAT(NEAlgorithm):
         else:
             self._key = random.PRNGKey(0)
         self._species = []
-        self.ask()  # refresh buffers with current population
+        if self._population:
+            encoded = np.stack([self._encode_genome(genome) for genome in self._population], axis=0)
+        else:
+            encoded = np.zeros((self.pop_size, self.param_size), dtype=np.float32)
+        self._encoded_genomes = jnp.asarray(encoded, dtype=jnp.float32)
 
     @property
     def best_params(self) -> jnp.ndarray:
@@ -652,6 +801,21 @@ class NEAT(NEAlgorithm):
         self._best_genome = genome.clone()
         self._best_fitness = float("-inf")
         self._seed_population_around(genome)
+        self._last_training_loss = float("nan")
+        self._train_accuracy = float("nan")
+        self._test_accuracy = float("nan")
+
+    @property
+    def training_loss(self) -> float:
+        return float(self._last_training_loss)
+
+    @property
+    def train_accuracy(self) -> float:
+        return float(self._train_accuracy)
+
+    @property
+    def test_accuracy(self) -> float:
+        return float(self._test_accuracy)
 
     # --------------------------------------------------------------------- #
     # Internal helpers

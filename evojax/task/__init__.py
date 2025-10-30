@@ -13,6 +13,10 @@
 # limitations under the License.
 
 from .base import VectorizedTask
+from .binary_classification import BinaryClassification
 
 
-__all__ = ['VectorizedTask']
+__all__ = [
+    'VectorizedTask',
+    'BinaryClassification',
+]
