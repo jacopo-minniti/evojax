@@ -50,12 +50,19 @@ def load_yaml(config_fname: str) -> dict:
 
 
 def _default_output_dir(config: Dict) -> Path:
-    base = config.get(
-        "output_base",
-        Path(f"log/{config['es_name']}/{config['problem_type']}"),
+    base = Path(
+        config.get(
+            "output_base",
+            Path(f"log/{config['es_name']}/{config['problem_type']}"),
+        )
     )
-    run_name = str(config.get("run_name", "default"))
-    return Path(base) / run_name
+    if "run_name" in config:
+        run_name = str(config["run_name"]).strip()
+        if run_name and run_name not in (".", "./"):
+            # Keep the legacy behaviour for explicit run names.
+            if base.name != run_name:
+                return base / run_name
+    return base
 
 
 def _ensure_dir(path: Path) -> None:
@@ -211,12 +218,19 @@ def _plot_decision_boundary(
 
 
 def _plot_architecture(solver: NEATBackprop, output_dir: Path) -> None:
-    if solver.best_params.size == 0 or solver._best_genome is None:
+    if solver.best_params.size == 0:
         return
 
     params = np.asarray(solver.best_params, dtype=np.float32)
-    genome = solver._decode_params(np.asarray(params, dtype=np.float32))
-    genome.express()
+    genome = solver._best_genome
+    if genome is None:
+        # Reconstruct the best genome from the encoded parameter vector.
+        genome = solver._decode_params(params)
+        genome.express()
+        solver._best_genome = genome.clone()
+    else:
+        genome = genome.clone()
+        genome.express()
 
     if not genome.nodes:
         return
