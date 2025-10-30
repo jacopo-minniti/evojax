@@ -19,7 +19,33 @@ from evojax.task import BinaryClassification
 from evojax.task.binary_dataset import BinaryClassificationDataset
 from evojax.trainer import Trainer
 from evojax.util import create_logger
-from scripts.benchmarks.problems import load_yaml
+
+
+###################################
+# from scripts.benchmarks.problems import load_yaml
+import yaml
+import re
+def load_yaml(config_fname: str) -> dict:
+    """Load in YAML config file."""
+    loader = yaml.SafeLoader
+    loader.add_implicit_resolver(
+        "tag:yaml.org,2002:float",
+        re.compile(
+            """^(?:
+        [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |\\.[0-9_]+(?:[eE][-+][0-9]+)?
+        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
+        |[-+]?\\.(?:inf|Inf|INF)
+        |\\.(?:nan|NaN|NAN))$""",
+            re.X,
+        ),
+        list("-+0123456789."),
+    )
+    with open(config_fname) as file:
+        yaml_config = yaml.load(file, Loader=loader)
+    return yaml_config
+###################################
 
 
 def _default_output_dir(config: Dict) -> Path:

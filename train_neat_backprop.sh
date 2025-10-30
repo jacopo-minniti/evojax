@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=neat_backprop
-#SBATCH --time=01:00:00
+#SBATCH --time=00:10:00
 #SBATCH --gpus-per-node=l40s:2
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
