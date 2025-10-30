@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=neat_backprop
-#SBATCH --time=00:10:00
-#SBATCH --gpus-per-node=l40s:1
+#SBATCH --time=01:00:00
+#SBATCH --gpus-per-node=l40s:2
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=8G
+#SBATCH --mem=16G
 #SBATCH --output=/scratch/jacopo04/evojax/jobs_logs/neat_backprop-%j.out
 #SBATCH --error=/scratch/jacopo04/evojax/jobs_logs/neat_backprop-%j.err
 #SBATCH -D /scratch/jacopo04/evojax
@@ -20,4 +20,7 @@ source .venv/bin/activate
 
 pip install --upgrade "jax[cuda12]"
 
-python examples/train_classifier.py --output-dir log/NEAT_backprop/binary_classification
+CONFIG_FNAME="${1:-scripts/benchmarks/configs/NEAT_backprop/binary_classification.yaml}"
+shift || true
+
+python examples/train_classifier.py --config_fname "${CONFIG_FNAME}" "$@"

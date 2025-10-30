@@ -6,6 +6,7 @@ import numpy as np
 from evojax.policy import MLPPolicy
 from evojax.policy.convnet import ConvNetPolicy
 from evojax.policy.neat import NEATPolicy
+from evojax.task import BinaryClassification
 
 
 def setup_problem(config, logger):
@@ -23,6 +24,8 @@ def setup_problem(config, logger):
         return setup_waterworld_ma(config)
     elif config["problem_type"] == "slimevolley":
         return setup_slimevolley(config)
+    elif config["problem_type"] == "binary_classification":
+        return setup_binary_classification(config)
 
 
 def setup_cartpole(config, hard=False):
@@ -124,6 +127,60 @@ def setup_slimevolley(config, max_steps: int = 3000):
             output_dim=train_task.act_shape[0],
             output_act_fn="tanh",
         )
+    return train_task, test_task, policy
+
+
+def setup_binary_classification(config):
+    dataset_cfg = config.setdefault("problem_config", {})
+    dataset_cfg.setdefault("dataset_type", "circle")
+    dataset_cfg.setdefault("train_size", 200)
+    dataset_cfg.setdefault("test_size", 200)
+    dataset_cfg.setdefault("dataset_noise", 0.5)
+    dataset_cfg.setdefault("dataset_seed", config.get("seed", 0))
+    dataset_cfg.setdefault("batch_size", 32)
+
+    train_task = BinaryClassification(
+        batch_size=int(dataset_cfg["batch_size"]),
+        test=False,
+        dataset_type=dataset_cfg["dataset_type"],
+        train_size=int(dataset_cfg["train_size"]),
+        test_size=int(dataset_cfg["test_size"]),
+        noise=float(dataset_cfg["dataset_noise"]),
+        dataset_seed=int(dataset_cfg["dataset_seed"]),
+    )
+    test_task = BinaryClassification(
+        batch_size=int(dataset_cfg["test_size"]),
+        test=True,
+        dataset_type=dataset_cfg["dataset_type"],
+        train_size=int(dataset_cfg["train_size"]),
+        test_size=int(dataset_cfg["test_size"]),
+        noise=float(dataset_cfg["dataset_noise"]),
+        dataset_seed=int(dataset_cfg["dataset_seed"]),
+    )
+
+    es_cfg = config.setdefault("es_config", {})
+    max_hidden = int(config.get("max_hidden_nodes", es_cfg.get("max_hidden_nodes", 16)))
+    propagation_steps = config.get("propagation_steps")
+    policy = NEATPolicy(
+        input_dim=train_task.obs_shape[0],
+        output_dim=train_task.act_shape[0],
+        max_hidden_nodes=max_hidden,
+        propagation_steps=propagation_steps,
+    )
+
+    es_cfg.setdefault("pop_size", int(config.get("pop_size", 64)))
+    es_cfg.setdefault("n_input", policy.input_dim)
+    es_cfg.setdefault("n_output", policy.output_dim)
+    es_cfg.setdefault("max_hidden_nodes", max_hidden)
+    es_cfg.setdefault("activation_choices", [1, 5, 9])
+    es_cfg.setdefault("batch_size", int(dataset_cfg["batch_size"]))
+    es_cfg.setdefault("grad_steps", 4)
+    es_cfg.setdefault("learning_rate", 1e-2)
+    es_cfg.setdefault("dataset_type", dataset_cfg["dataset_type"])
+    es_cfg.setdefault("train_size", int(dataset_cfg["train_size"]))
+    es_cfg.setdefault("test_size", int(dataset_cfg["test_size"]))
+    es_cfg.setdefault("dataset_noise", float(dataset_cfg["dataset_noise"]))
+    es_cfg.setdefault("dataset_seed", int(dataset_cfg["dataset_seed"]))
     return train_task, test_task, policy
 
 
