@@ -22,7 +22,8 @@ es_config:
   n_input: 2
   n_output: 1
   max_hidden_nodes: 24
-  activation_choices: [1, 5, 9]
+  activation_choices: [5, 9]
+  init_activation: 5
 
   grad_steps: 8
   learning_rate: 0.005
@@ -34,12 +35,12 @@ es_config:
   dataset_noise: 0.35
   dataset_seed: 42
 
-  prob_add_conn: 0.25
-  prob_add_node: 0.15
+  prob_add_conn: 0.8
+  prob_add_node: 0.8
   prob_crossover: 0.75
   prob_enable: 0.05
   prob_mut_conn: 0.0
-  prob_mut_act: 0.05
+  prob_mut_act: 0.1
   prob_init_enable: 1.0
 
   select_cull_ratio: 0.15
@@ -57,13 +58,13 @@ es_config:
   ann_abs_w_cap: 5.0
   alg_prob_moo: 0.0
 
-max_iter: 150
+max_iter: 50
 log_interval: 1
 test_interval: 15
 n_repeats: 1
 num_tests: 64
 
 seed: 42
-gpu_id: [0]
+gpu_id: [0, 1]
 debug: false
 run_name: "default"
