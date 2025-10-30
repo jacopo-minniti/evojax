@@ -918,7 +918,9 @@ class NEATBackprop(NEAlgorithm):
         
         fitness = np.array([genome.fitness for genome in self._population])
         conn_counts = np.array([max(genome.n_conn, 1) for genome in self._population], dtype=float)
-        obj = np.vstack([fitness, 1.0 / conn_counts]).T
+        # Softer structural pressure: penalize by inverse square-root of enabled connections.
+        structure_cost = 1.0 / np.sqrt(conn_counts)
+        obj = np.vstack([fitness, structure_cost]).T
         rng = self._make_rng()[0]
 
         if self._cfg["alg_prob_moo"] < rng.random():

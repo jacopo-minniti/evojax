@@ -43,8 +43,8 @@ es_config:
   prob_mut_act: 0.1
   prob_init_enable: 1.0
 
-  select_cull_ratio: 0.15
-  select_elite_ratio: 0.15
+  select_cull_ratio: 0.2
+  select_elite_ratio: 0.1
   select_tourn_size: 3
 
   spec_compat_mod: 0.2
@@ -56,7 +56,7 @@ es_config:
   spec_weight_coef: 0.4
 
   ann_abs_w_cap: 5.0
-  alg_prob_moo: 0.0
+  alg_prob_moo: 0.85
 
 max_iter: 50
 log_interval: 1
