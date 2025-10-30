@@ -499,6 +499,7 @@ class NEATBackprop(NEAlgorithm):
         grad_steps: int = 1,
         propagation_steps: Optional[int] = None,
         dataset_seed: Optional[int] = None,
+        dataset: Optional[BinaryClassificationDataset] = None,
         logger: Optional[logging.Logger] = None,
     ):
         if logger is None:
@@ -520,15 +521,27 @@ class NEATBackprop(NEAlgorithm):
             raise ValueError("activation_choices must contain at least one activation id.")
         self._ann_init_act = int(init_activation if init_activation is not None else self._activation_choices[0])
         ann_mut_sigma = ann_abs_w_cap * 0.2 if ann_mut_sigma is None else ann_mut_sigma
-        ds_seed = int(dataset_seed if dataset_seed is not None else (seed + 1))
-        self._dataset = BinaryClassificationDataset(
-            dataset_type=dataset_type,
-            train_size=train_size,
-            test_size=test_size,
-            noise=dataset_noise,
-            seed=ds_seed,
-        )
-        self._dataset_seed = ds_seed
+        dataset_type = dataset_type.lower()
+        if dataset is not None:
+            if dataset.dataset_type != dataset_type:
+                raise ValueError(
+                    f"Provided dataset_type '{dataset_type}' does not match "
+                    f"dataset.dataset_type '{dataset.dataset_type}'."
+                )
+            if dataset.train_size != train_size or dataset.test_size != test_size:
+                raise ValueError(
+                    "Provided dataset does not match requested train/test sizes."
+                )
+            self._dataset = dataset
+        else:
+            ds_seed = int(dataset_seed if dataset_seed is not None else (seed + 1))
+            self._dataset = BinaryClassificationDataset(
+                dataset_type=dataset_type,
+                train_size=train_size,
+                test_size=test_size,
+                noise=dataset_noise,
+                seed=ds_seed,
+            )
         self._batch_size = int(batch_size)
         if self._batch_size <= 0:
             raise ValueError("batch_size must be greater than 0 for backprop training.")
@@ -668,9 +681,14 @@ class NEATBackprop(NEAlgorithm):
                 loss_fn = lambda p: self._loss_fn(p, batch_x, batch_y)
                 loss, grad = jax.value_and_grad(loss_fn)(params)
                 params = params - self._learning_rate * grad * self._trainable_mask
-                clipped = jnp.clip(params[self._weights_slice], -cap, cap)
-                params = params.at[self._weights_slice].set(clipped)
-                params = params.at[self._gene_weights_slice].set(clipped)
+                weight_matrix = params[self._weights_slice].reshape(self._max_nodes, self._max_nodes)
+                clipped_weights = jnp.clip(weight_matrix, -cap, cap)
+                params = params.at[self._weights_slice].set(clipped_weights.reshape(-1))
+                stored_matrix = params[self._gene_weights_slice].reshape(self._max_nodes, self._max_nodes)
+                stored_matrix = jnp.clip(stored_matrix, -cap, cap)
+                state_matrix = params[self._state_slice].reshape(self._max_nodes, self._max_nodes)
+                updated_stored = jnp.where(state_matrix > 0.0, clipped_weights, stored_matrix)
+                params = params.at[self._gene_weights_slice].set(updated_stored.reshape(-1))
                 last_loss = loss
             if jnp.isnan(last_loss):
                 loss_value = float("nan")
@@ -725,6 +743,19 @@ class NEATBackprop(NEAlgorithm):
         self._train_labels = jnp.asarray(self._train_labels_np)
         self._test_inputs = jnp.asarray(self._test_inputs_np)
         self._test_labels = jnp.asarray(self._test_labels_np)
+
+    def attach_dataset(self, dataset: BinaryClassificationDataset) -> None:
+        if not isinstance(dataset, BinaryClassificationDataset):
+            raise TypeError("attach_dataset expects a BinaryClassificationDataset instance.")
+        if dataset.dataset_type != self._dataset.dataset_type:
+            raise ValueError(
+                f"attach_dataset expected dataset_type '{self._dataset.dataset_type}' "
+                f"but received '{dataset.dataset_type}'."
+            )
+        if dataset.train_size != self._dataset.train_size or dataset.test_size != self._dataset.test_size:
+            raise ValueError("attach_dataset received dataset with mismatched train/test sizes.")
+        self._dataset = dataset
+        self._refresh_dataset_arrays()
 
     def save_state(self) -> Dict[str, Any]:
         state = {

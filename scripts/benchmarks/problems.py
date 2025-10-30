@@ -7,6 +7,7 @@ from evojax.policy import MLPPolicy
 from evojax.policy.convnet import ConvNetPolicy
 from evojax.policy.neat import NEATPolicy
 from evojax.task import BinaryClassification
+from evojax.task.binary_dataset import BinaryClassificationDataset
 
 
 def setup_problem(config, logger):
@@ -139,6 +140,14 @@ def setup_binary_classification(config):
     dataset_cfg.setdefault("dataset_seed", config.get("seed", 0))
     dataset_cfg.setdefault("batch_size", 32)
 
+    dataset = BinaryClassificationDataset(
+        dataset_type=dataset_cfg["dataset_type"],
+        train_size=int(dataset_cfg["train_size"]),
+        test_size=int(dataset_cfg["test_size"]),
+        noise=float(dataset_cfg["dataset_noise"]),
+        seed=int(dataset_cfg["dataset_seed"]),
+    )
+
     train_task = BinaryClassification(
         batch_size=int(dataset_cfg["batch_size"]),
         test=False,
@@ -147,6 +156,7 @@ def setup_binary_classification(config):
         test_size=int(dataset_cfg["test_size"]),
         noise=float(dataset_cfg["dataset_noise"]),
         dataset_seed=int(dataset_cfg["dataset_seed"]),
+        dataset=dataset,
     )
     test_task = BinaryClassification(
         batch_size=int(dataset_cfg["test_size"]),
@@ -156,6 +166,7 @@ def setup_binary_classification(config):
         test_size=int(dataset_cfg["test_size"]),
         noise=float(dataset_cfg["dataset_noise"]),
         dataset_seed=int(dataset_cfg["dataset_seed"]),
+        dataset=dataset,
     )
 
     es_cfg = config.setdefault("es_config", {})

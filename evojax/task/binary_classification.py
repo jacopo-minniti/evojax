@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -45,18 +45,36 @@ class BinaryClassification(VectorizedTask):
         test_size: int = 200,
         noise: float = 0.5,
         dataset_seed: int = 0,
+        dataset: Optional[BinaryClassificationDataset] = None,
     ):
-        self._dataset = BinaryClassificationDataset(
-            dataset_type=dataset_type,
-            train_size=train_size,
-            test_size=test_size,
-            noise=noise,
-            seed=dataset_seed,
-        )
+        dataset_type = dataset_type.lower()
+        if dataset is None:
+            dataset = BinaryClassificationDataset(
+                dataset_type=dataset_type,
+                train_size=train_size,
+                test_size=test_size,
+                noise=noise,
+                seed=dataset_seed,
+            )
+        else:
+            if dataset.dataset_type != dataset_type:
+                raise ValueError(
+                    f"Provided dataset_type '{dataset_type}' does not match "
+                    f"dataset.dataset_type '{dataset.dataset_type}'."
+                )
+            if dataset.train_size != train_size or dataset.test_size != test_size:
+                raise ValueError(
+                    "Provided dataset does not match requested train/test sizes."
+                )
+        self._dataset = dataset
         self._train_inputs = jnp.asarray(self._dataset.train_inputs, dtype=jnp.float32)
-        self._train_labels = jnp.asarray(self._dataset.train_labels.reshape(-1), dtype=jnp.float32)
+        self._train_labels = jnp.asarray(
+            self._dataset.train_labels.reshape(-1), dtype=jnp.float32
+        )
         self._test_inputs = jnp.asarray(self._dataset.test_inputs, dtype=jnp.float32)
-        self._test_labels = jnp.asarray(self._dataset.test_labels.reshape(-1), dtype=jnp.float32)
+        self._test_labels = jnp.asarray(
+            self._dataset.test_labels.reshape(-1), dtype=jnp.float32
+        )
 
         self._test = bool(test)
         self._batch_size = int(batch_size)
@@ -120,6 +138,10 @@ class BinaryClassification(VectorizedTask):
         self._reset_fn = jax.jit(jax.vmap(reset_fn))
         self._step_fn = jax.jit(jax.vmap(step_fn))
 
+    @property
+    def dataset(self) -> BinaryClassificationDataset:
+        return self._dataset
+
     def reset(self, key: jnp.ndarray) -> BinaryState:
         return self._reset_fn(key)
 
@@ -129,4 +151,3 @@ class BinaryClassification(VectorizedTask):
         action: jnp.ndarray,
     ):
         return self._step_fn(state, action)
-

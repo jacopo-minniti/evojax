@@ -6,14 +6,15 @@ import csv
 import json
 import shutil
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import jax.nn as jnn
 import jax.numpy as jnp
 
-from evojax.algo.neat_backprop import NEATBackprop
+from evojax.algo.neat_backprop import NEATBackprop, get_node_order, get_layers
 from evojax.policy.neat import NEATPolicy
 from evojax.task import BinaryClassification
 from evojax.task.binary_dataset import BinaryClassificationDataset
@@ -154,17 +155,11 @@ def _plot_metrics(history: Dict[str, List[Dict[str, float]]], output_dir: Path) 
 
 def _plot_decision_boundary(
     dataset_cfg: Dict,
+    dataset: BinaryClassificationDataset,
     solver: NEATBackprop,
     policy: NEATPolicy,
     output_dir: Path,
 ) -> None:
-    dataset = BinaryClassificationDataset(
-        dataset_type=dataset_cfg["dataset_type"],
-        train_size=int(dataset_cfg["train_size"]),
-        test_size=int(dataset_cfg["test_size"]),
-        noise=float(dataset_cfg["dataset_noise"]),
-        seed=int(dataset_cfg["dataset_seed"]),
-    )
     grid_low, grid_high = dataset_cfg["grid_range"]
     resolution = int(dataset_cfg["grid_resolution"])
 
@@ -215,6 +210,156 @@ def _plot_decision_boundary(
     plt.close(fig)
 
 
+def _plot_architecture(solver: NEATBackprop, output_dir: Path) -> None:
+    if solver.best_params.size == 0 or solver._best_genome is None:
+        return
+
+    params = np.asarray(solver.best_params, dtype=np.float32)
+    genome = solver._decode_params(np.asarray(params, dtype=np.float32))
+    genome.express()
+
+    if not genome.nodes:
+        return
+
+    node_arr, conn_arr = genome.to_arrays()
+    if node_arr.size == 0:
+        return
+
+    order, w_mat = get_node_order(node_arr, conn_arr)
+    bias_ids = np.sort(node_arr[0, node_arr[1, :] == 4].astype(int))
+    input_ids = np.sort(node_arr[0, node_arr[1, :] == 1].astype(int))
+    output_ids = np.sort(node_arr[0, node_arr[1, :] == 2].astype(int))
+
+    if order is False:
+        layer_map = {node_id: 0.0 for node_id in bias_ids}
+        layer_map.update({node_id: 1.0 for node_id in input_ids})
+        hidden_ids = np.sort(
+            np.array([nid for nid, gene in genome.nodes.items() if gene.node_type == 3], dtype=int)
+        )
+        layer_map.update({node_id: 1.5 for node_id in hidden_ids})
+        layer_map.update({node_id: 2.0 for node_id in output_ids})
+    else:
+        n_inputs = genome.n_input + 1
+        n_outputs = genome.n_output
+        hidden_slice = slice(n_inputs, None if n_outputs == 0 else -n_outputs)
+        hidden_matrix = w_mat[hidden_slice, hidden_slice]
+        if hidden_matrix.size == 0:
+            hidden_layers = np.zeros(0)
+            hidden_ids_order = np.asarray([], dtype=int)
+        else:
+            hidden_layers = get_layers(hidden_matrix) + 1.0
+            hidden_ids_order = order[n_inputs : order.shape[0] - n_outputs] if n_outputs > 0 else order[n_inputs:]
+        node_layers = np.concatenate(
+            [
+                np.zeros(len(bias_ids) + len(input_ids)),
+                hidden_layers,
+                np.full(len(output_ids), (np.max(hidden_layers) + 1.0) if hidden_layers.size > 0 else 1.0),
+            ]
+        )
+        order_nodes = np.concatenate(
+            [
+                bias_ids,
+                input_ids,
+                hidden_ids_order.astype(int),
+                output_ids,
+            ]
+        )
+        layer_map = {int(node_id): float(layer) for node_id, layer in zip(order_nodes, node_layers)}
+
+    max_layer = max(layer_map.values()) if layer_map else 1.0
+    positions: Dict[int, Tuple[float, float]] = {}
+    layer_groups: Dict[float, List[int]] = {}
+    for node_id, layer in layer_map.items():
+        layer_groups.setdefault(layer, []).append(node_id)
+
+    for layer in sorted(layer_groups.keys()):
+        node_ids = sorted(layer_groups[layer])
+        if len(node_ids) == 1:
+            y_vals = [0.0]
+        else:
+            y_vals = np.linspace(-1.0, 1.0, len(node_ids))
+        for node_id, y in zip(node_ids, y_vals):
+            x = layer / max(max_layer, 1e-6)
+            positions[node_id] = (float(x), float(y))
+
+    if not positions:
+        return
+
+    min_y = min(y for _, y in positions.values())
+    max_y_pos = max(y for _, y in positions.values())
+    y_margin = 0.2 if max_y_pos > min_y else 0.5
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cap = float(solver._cfg.get("ann_abs_w_cap", 5.0))
+    for conn in genome.connections.values():
+        if not conn.enabled:
+            continue
+        if conn.source not in positions or conn.target not in positions:
+            continue
+        x_vals = [positions[conn.source][0], positions[conn.target][0]]
+        y_vals = [positions[conn.source][1], positions[conn.target][1]]
+        weight = float(conn.weight)
+        weight_scale = min(abs(weight) / cap, 1.0) if cap > 0 else 0.0
+        color = "tab:red" if weight >= 0 else "tab:blue"
+        linewidth = 1.0 + 2.0 * weight_scale
+        alpha = 0.4 + 0.5 * weight_scale
+        ax.plot(x_vals, y_vals, color=color, linewidth=linewidth, alpha=alpha, zorder=1)
+
+    type_colors = {4: "tab:orange", 1: "tab:blue", 3: "tab:purple", 2: "tab:green"}
+    sizes = {4: 280, 1: 260, 3: 280, 2: 320}
+    xs, ys, cs, ss = [], [], [], []
+    for node_id, (x, y) in positions.items():
+        node = genome.nodes[node_id]
+        xs.append(x)
+        ys.append(y)
+        cs.append(type_colors.get(node.node_type, "gray"))
+        ss.append(sizes.get(node.node_type, 240))
+
+    ax.scatter(xs, ys, c=cs, s=ss, edgecolors="black", linewidths=1.2, zorder=2)
+
+    act_names = {
+        1: "lin",
+        2: "step",
+        3: "sin",
+        4: "gauss",
+        5: "tanh",
+        6: "sigm",
+        7: "neg",
+        8: "abs",
+        9: "relu",
+        10: "cos",
+        11: "sq",
+    }
+    for node_id, (x, y) in positions.items():
+        node = genome.nodes[node_id]
+        ax.text(x, y + 0.08, f"{node_id}", fontsize=9, ha="center", va="bottom", weight="bold")
+        ax.text(
+            x,
+            y - 0.1,
+            act_names.get(node.activation, f"a{node.activation}"),
+            fontsize=8,
+            ha="center",
+            va="top",
+            color="dimgray",
+        )
+
+    ax.set_title("Best Genome Architecture")
+    ax.set_xlim(-0.1, 1.1)
+    ax.set_ylim(min_y - y_margin, max_y_pos + y_margin)
+    ax.axis("off")
+
+    legend_handles = [
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=type_colors[4], markeredgecolor="black", markersize=8, label="Bias"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=type_colors[1], markeredgecolor="black", markersize=8, label="Input"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=type_colors[3], markeredgecolor="black", markersize=8, label="Hidden"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor=type_colors[2], markeredgecolor="black", markersize=8, label="Output"),
+    ]
+    ax.legend(handles=legend_handles, loc="lower center", bbox_to_anchor=(0.5, -0.1), ncol=4, frameon=False)
+
+    fig.tight_layout()
+    fig.savefig(output_dir / "plots" / "architecture.png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
 def _build_solver_and_policy(
     config: Dict,
     dataset_cfg: Dict,
@@ -256,7 +401,9 @@ def _build_solver_and_policy(
     return solver, policy
 
 
-def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NEATBackprop, NEATPolicy, Path, Dict]:
+def _train_from_config(
+    config: Dict, config_path: Path | None
+) -> Tuple[Dict, NEATBackprop, NEATPolicy, Path, Dict, BinaryClassificationDataset]:
     if config["es_name"] != "NEATBackprop":
         raise ValueError("This trainer expects es_name to be 'NEATBackprop'.")
     if config["problem_type"] != "binary_classification":
@@ -276,6 +423,14 @@ def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NE
 
     dataset_cfg = _extract_dataset_config(config)
 
+    dataset = BinaryClassificationDataset(
+        dataset_type=dataset_cfg["dataset_type"],
+        train_size=int(dataset_cfg["train_size"]),
+        test_size=int(dataset_cfg["test_size"]),
+        noise=float(dataset_cfg["dataset_noise"]),
+        seed=int(dataset_cfg["dataset_seed"]),
+    )
+
     train_task = BinaryClassification(
         batch_size=int(dataset_cfg["batch_size"]),
         test=False,
@@ -284,6 +439,7 @@ def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NE
         test_size=int(dataset_cfg["test_size"]),
         noise=float(dataset_cfg["dataset_noise"]),
         dataset_seed=int(dataset_cfg["dataset_seed"]),
+        dataset=dataset,
     )
     test_task = BinaryClassification(
         batch_size=int(dataset_cfg["test_size"]),
@@ -293,6 +449,7 @@ def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NE
         test_size=int(dataset_cfg["test_size"]),
         noise=float(dataset_cfg["dataset_noise"]),
         dataset_seed=int(dataset_cfg["dataset_seed"]),
+        dataset=dataset,
     )
 
     solver, policy = _build_solver_and_policy(
@@ -302,6 +459,7 @@ def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NE
         train_task.act_shape[0],
         logger,
     )
+    solver.attach_dataset(dataset)
 
     history: Dict[str, List[Dict[str, float]]] = {"train": [], "test": []}
 
@@ -343,7 +501,7 @@ def _train_from_config(config: Dict, config_path: Path | None) -> Tuple[Dict, NE
     best_seen = max((entry["max_fitness"] for entry in history["train"]), default=float("-inf"))
     logger.info("Training complete. Best observed fitness %.4f", best_seen)
 
-    return history, solver, policy, output_dir, dataset_cfg
+    return history, solver, policy, output_dir, dataset_cfg, dataset
 
 
 def main() -> None:
@@ -357,10 +515,13 @@ def main() -> None:
     args = parser.parse_args()
     config = load_yaml(str(args.config_fname))
 
-    history, solver, policy, output_dir, dataset_cfg = _train_from_config(config, args.config_fname)
+    history, solver, policy, output_dir, dataset_cfg, dataset = _train_from_config(
+        config, args.config_fname
+    )
     _save_metrics(history, output_dir)
     _plot_metrics(history, output_dir)
-    _plot_decision_boundary(dataset_cfg, solver, policy, output_dir)
+    _plot_decision_boundary(dataset_cfg, dataset, solver, policy, output_dir)
+    _plot_architecture(solver, output_dir)
 
     print(f"Training artifacts saved under {output_dir}")
 

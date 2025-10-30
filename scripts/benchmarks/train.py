@@ -43,6 +43,8 @@ def main(config):
         param_size=policy.num_params,
         seed=config["seed"],
     )
+    if hasattr(train_task, "dataset") and hasattr(solver, "attach_dataset"):
+        solver.attach_dataset(train_task.dataset)
 
     # Train.
     trainer = Trainer(

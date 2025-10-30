@@ -2,66 +2,66 @@ es_name: "NEATBackprop"
 problem_type: "binary_classification"
 
 normalize: false
-pop_size: 256
-max_hidden_nodes: 16
+pop_size: 128
+max_hidden_nodes: 24
 propagation_steps: null
 output_base: "log/NEAT_backprop/binary_classification/default"
 
 problem_config:
   dataset_type: "circle"
-  train_size: 200
-  test_size: 200
-  dataset_noise: 0.5
+  train_size: 512
+  test_size: 512
+  dataset_noise: 0.35
   dataset_seed: 42
-  batch_size: 32
+  batch_size: 64
   grid_range: [-6.0, 6.0]
   grid_resolution: 200
 
 es_config:
-  pop_size: 64
+  pop_size: 128
   n_input: 2
   n_output: 1
-  max_hidden_nodes: 16
-  activation_choices: [5, 9]
+  max_hidden_nodes: 24
+  activation_choices: [1, 5, 9]
 
-  grad_steps: 4
-  learning_rate: 0.001
-  batch_size: 32
+  grad_steps: 8
+  learning_rate: 0.005
+  batch_size: 64
 
   dataset_type: "circle"
-  train_size: 200
-  test_size: 200
-  dataset_noise: 0.5
+  train_size: 512
+  test_size: 512
+  dataset_noise: 0.35
   dataset_seed: 42
 
-  prob_add_conn: 0.3
-  prob_add_node: 0.2
-  prob_crossover: 0.5
-  prob_enable: 0.01
+  prob_add_conn: 0.25
+  prob_add_node: 0.15
+  prob_crossover: 0.75
+  prob_enable: 0.05
   prob_mut_conn: 0.0
-  prob_mut_act: 0.0
+  prob_mut_act: 0.05
   prob_init_enable: 1.0
 
-  select_cull_ratio: 0.1
-  select_elite_ratio: 0.1
-  select_tourn_size: 2
+  select_cull_ratio: 0.15
+  select_elite_ratio: 0.15
+  select_tourn_size: 3
 
-  spec_compat_mod: 0.25
-  spec_drop_off_age: 64
-  spec_target: 4
-  spec_thresh: 2.0
-  spec_thresh_min: 2.0
+  spec_compat_mod: 0.2
+  spec_drop_off_age: 40
+  spec_target: 5
+  spec_thresh: 2.5
+  spec_thresh_min: 1.5
   spec_gene_coef: 1.0
-  spec_weight_coef: 0.5
+  spec_weight_coef: 0.4
 
   ann_abs_w_cap: 5.0
   alg_prob_moo: 0.0
 
-max_iter: 50
+max_iter: 150
 log_interval: 1
-test_interval: 10
+test_interval: 15
 n_repeats: 1
-num_tests: 32
+num_tests: 64
 
 seed: 42
 gpu_id: [0]
