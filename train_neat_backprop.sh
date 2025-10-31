@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=neat_backprop
-#SBATCH --time=00:20:00
-#SBATCH --gpus-per-node=l40s:2
+#SBATCH --time=01:00:00
+#SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --output=/scratch/jacopo04/evojax/jobs_logs/neat_backprop-%j.out
