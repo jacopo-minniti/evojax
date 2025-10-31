@@ -50,24 +50,19 @@ def load_yaml(config_fname: str) -> dict:
 
 
 def _default_output_dir(config: Dict) -> Path:
-    base = Path(
-        config.get(
-            "output_base",
-            Path(f"log/{config['es_name']}/{config['problem_type']}"),
-        )
-    )
-    if "run_name" in config:
-        run_name = str(config["run_name"]).strip()
-        if run_name and run_name not in (".", "./"):
-            # Keep the legacy behaviour for explicit run names.
-            if base.name != run_name:
-                return base / run_name
+    if "output_base" in config and config["output_base"] is not None:
+        return Path(str(config["output_base"]))
+
+    base = Path(f"log/{config['es_name']}/{config['problem_type']}")
+    run_name = str(config.get("run_name", "default")).strip()
+    if run_name and run_name not in (".", "./"):
+        return base / run_name
     return base
 
 
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    for sub in ("plots", "metrics", "checkpoints"):
+    for sub in ("plots", "metrics"):
         (path / sub).mkdir(exist_ok=True)
 
 
