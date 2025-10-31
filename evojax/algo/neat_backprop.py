@@ -610,6 +610,11 @@ class NEATBackprop(NEAlgorithm):
         mask[self._weights_slice] = 1.0
         self._trainable_mask = jnp.asarray(mask)
         self._forward_fn = self._policy._forward_fn
+
+        loss_fn = lambda params, inputs, targets: self._loss_fn(params, inputs, targets)
+        self._batched_loss_grad = jax.jit(
+            jax.vmap(jax.value_and_grad(loss_fn), in_axes=(0, 0, 0))
+        )
         self._last_training_loss: float = float("nan")
         self._train_accuracy: float = float("nan")
         self._test_accuracy: float = float("nan")
@@ -671,41 +676,61 @@ class NEATBackprop(NEAlgorithm):
             or not self._population
         ):
             return
-        losses: List[float] = []
         cap = float(self._cfg["ann_abs_w_cap"])
+
+        encoded_list = [self._encode_genome(genome) for genome in self._population]
+        params_matrix = jnp.asarray(encoded_list, dtype=jnp.float32)
+        last_loss = jnp.full((self.pop_size,), jnp.nan, dtype=jnp.float32)
+
+        for _ in range(self._grad_steps):
+            batch_inputs = []
+            batch_targets = []
+            for _ in range(self.pop_size):
+                bx, by = self._sample_batch()
+                batch_inputs.append(bx)
+                batch_targets.append(by)
+            batch_x = jnp.stack(batch_inputs, axis=0)
+            batch_y = jnp.stack(batch_targets, axis=0)
+
+            losses, grads = self._batched_loss_grad(params_matrix, batch_x, batch_y)
+            params_matrix = params_matrix - self._learning_rate * grads * self._trainable_mask
+
+            weight_matrix = params_matrix[:, self._weights_slice].reshape(
+                self.pop_size, self._max_nodes, self._max_nodes
+            )
+            clipped_weights = jnp.clip(weight_matrix, -cap, cap)
+            params_matrix = params_matrix.at[:, self._weights_slice].set(
+                clipped_weights.reshape(self.pop_size, -1)
+            )
+
+            stored_matrix = params_matrix[:, self._gene_weights_slice].reshape(
+                self.pop_size, self._max_nodes, self._max_nodes
+            )
+            stored_matrix = jnp.clip(stored_matrix, -cap, cap)
+            state_matrix = params_matrix[:, self._state_slice].reshape(
+                self.pop_size, self._max_nodes, self._max_nodes
+            )
+            updated_stored = jnp.where(state_matrix > 0.0, clipped_weights, stored_matrix)
+            params_matrix = params_matrix.at[:, self._gene_weights_slice].set(
+                updated_stored.reshape(self.pop_size, -1)
+            )
+
+            last_loss = losses
+
+        params_np = np.asarray(params_matrix, dtype=np.float32)
+        losses_np = np.asarray(last_loss, dtype=np.float32)
+
         for idx, genome in enumerate(self._population):
-            params = jnp.asarray(self._encode_genome(genome), dtype=jnp.float32)
-            last_loss = jnp.nan
-            for _ in range(self._grad_steps):
-                batch_x, batch_y = self._sample_batch()
-                loss_fn = lambda p: self._loss_fn(p, batch_x, batch_y)
-                loss, grad = jax.value_and_grad(loss_fn)(params)
-                params = params - self._learning_rate * grad * self._trainable_mask
-                weight_matrix = params[self._weights_slice].reshape(self._max_nodes, self._max_nodes)
-                clipped_weights = jnp.clip(weight_matrix, -cap, cap)
-                params = params.at[self._weights_slice].set(clipped_weights.reshape(-1))
-                stored_matrix = params[self._gene_weights_slice].reshape(self._max_nodes, self._max_nodes)
-                stored_matrix = jnp.clip(stored_matrix, -cap, cap)
-                state_matrix = params[self._state_slice].reshape(self._max_nodes, self._max_nodes)
-                updated_stored = jnp.where(state_matrix > 0.0, clipped_weights, stored_matrix)
-                params = params.at[self._gene_weights_slice].set(updated_stored.reshape(-1))
-                last_loss = loss
-            if jnp.isnan(last_loss):
-                loss_value = float("nan")
-            else:
-                loss_value = float(last_loss)
-            losses.append(loss_value)
-            updated = self._decode_params(np.asarray(params, dtype=np.float32))
+            updated = self._decode_params(params_np[idx])
             updated.fitness = genome.fitness
             updated.rank = genome.rank
             updated.birth = genome.birth
             updated.species = genome.species
             self._population[idx] = updated
-        if losses:
-            finite_losses = [val for val in losses if not np.isnan(val)]
-            self._last_training_loss = float(np.mean(finite_losses)) if finite_losses else float("nan")
-        else:
-            self._last_training_loss = float("nan")
+
+        finite_losses = [val for val in losses_np if not np.isnan(val)]
+        self._last_training_loss = float(np.mean(finite_losses)) if finite_losses else float("nan")
+        self._encoded_genomes = params_matrix
 
     def _sample_batch(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
         batch_x_np, batch_y_np = self._dataset.sample_batch(self._batch_size)
