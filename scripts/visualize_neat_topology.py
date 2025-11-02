@@ -88,11 +88,12 @@ def main():
     dot.attr("node", shape="circle", style="filled", fontname="Helvetica", fontsize="10")
 
     # --- Node color map ---
+    # NEAT NodeGene types: 1=input, 2=output, 3=hidden, 4=bias.
     color_map = {
-        0: "lightblue",   # input
-        1: "lightgray",   # bias
-        2: "lightgreen",  # hidden
-        3: "orange",      # output
+        1: "lightblue",   # input
+        2: "orange",      # output
+        3: "lightgreen",  # hidden
+        4: "lightgray",   # bias
     }
 
     # --- Activation map ---
@@ -111,19 +112,17 @@ def main():
     }
 
     # --- Node placement by type ---
-    ranks = {"input": [], "bias": [], "hidden": [], "output": []}
+    rank_names = ["bias", "input", "hidden", "output"]
+    ranks = {name: [] for name in rank_names}
+    type_to_rank = {1: "input", 2: "output", 3: "hidden", 4: "bias"}
+
     for node_id, node_type, act_id in node_arr.T:
         node_id, node_type, act_id = int(node_id), int(node_type), int(act_id)
-        if node_type == 0:
-            ranks["input"].append(node_id)
-        elif node_type == 1:
-            ranks["bias"].append(node_id)
-        elif node_type == 2:
-            ranks["hidden"].append(node_id)
-        elif node_type == 3:
-            ranks["output"].append(node_id)
+        rank_name = type_to_rank.get(node_type)
+        if rank_name:
+            ranks[rank_name].append(node_id)
 
-        label = f"{activation_map.get(act_id, '')}"
+        label = "" if node_type == 2 else activation_map.get(act_id, "")
         dot.node(str(node_id), label=label, fillcolor=color_map.get(node_type, "white"))
 
     # --- Normalize weights ---
@@ -146,12 +145,18 @@ def main():
         dot.edge(str(int(src)), str(int(dst)), color="black", penwidth=str(penwidth))
 
     # --- Rank organization ---
-    for rank_name, nodes in ranks.items():
+    for rank_name in rank_names:
+        nodes = ranks[rank_name]
         if nodes:
             with dot.subgraph() as s:
                 s.attr(rank="same")
                 for n in nodes:
                     s.node(str(n))
+
+    # --- Enforce layer ordering left-to-right ---
+    ordered_layers = [ranks[name] for name in rank_names if ranks[name]]
+    for src_nodes, dst_nodes in zip(ordered_layers, ordered_layers[1:]):
+        dot.edge(str(src_nodes[0]), str(dst_nodes[0]), style="invis", weight="10")
 
     # --- Output path (same directory as model) ---
     out_path = model_path.parent / "neat_topology"
