@@ -84,7 +84,15 @@ def main():
 
     # --- Graph setup ---
     dot = Digraph("NEAT_Topology", format="png")
-    dot.attr(rankdir="LR", splines="true", concentrate="true", ranksep="2.0", nodesep="1.5")
+    dot.attr(
+        rankdir="LR",
+        splines="true",
+        concentrate="true",
+        ranksep="2.8",
+        nodesep="0.8",
+        pad="0.5",
+    )
+    dot.attr("graph", ratio="1.3")
     dot.attr("node", shape="circle", style="filled", fontname="Helvetica", fontsize="10")
 
     # --- Node color map ---
