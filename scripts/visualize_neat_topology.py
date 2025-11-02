@@ -148,6 +148,9 @@ def main():
     for _, src, dst, weight, enabled in conn_arr.T:
         if enabled < 0.5:
             continue
+        if int(src) == int(dst):
+            # Ignore self-loops in the visualization.
+            continue
         # softer thickness scaling
         penwidth = 0.3 + 2.5 * next(w_iter, 0.5)
         dot.edge(str(int(src)), str(int(dst)), color="black", penwidth=str(penwidth))
