@@ -1,6 +1,6 @@
 es_name: "NEAT"
 problem_type: "slimevolley"
-env_name: "greedy"
+env_name: "global"
 
 normalize: false
 pop_size: 256
@@ -13,19 +13,19 @@ es_config:
   n_output: 3
 
   max_hidden_nodes: 64
-  activation_choices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+  activation_choices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
-  prob_add_conn: 0.4
-  prob_add_node: 0.4
+  prob_add_conn: 0.8
+  prob_add_node: 0.8
   prob_crossover: 0.5
   prob_enable: 0.1
-  prob_mut_conn: 0.2
+  prob_mut_conn: 0.5
   prob_mut_act: 0.2
   prob_init_enable: 0.9
 
-  select_cull_ratio: 0.25
-  select_elite_ratio: 0.25
-  select_tourn_size: 3
+  select_cull_ratio: 0.1
+  select_elite_ratio: 0.1
+  select_tourn_size: 2
 
   spec_compat_mod: 0.2
   spec_drop_off_age: 32
@@ -35,9 +35,9 @@ es_config:
   spec_gene_coef: 1.1
   spec_weight_coef: 0.6
   ann_abs_w_cap: 3.0
-  alg_prob_moo: 0.5
+  alg_prob_moo: 0.1
 
-max_iter: 1000
+max_iter: 500
 log_interval: 5
 test_interval: 100
 n_repeats: 8

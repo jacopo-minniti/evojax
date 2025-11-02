@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-import argparse, yaml, numpy as np
+import argparse
+import yaml
+import numpy as np
+import re
 from pathlib import Path
 from graphviz import Digraph
-
 from evojax.algo.neat import NEAT
-
-############################
-# from scripts.benchmarks.problems import load_yaml, setup_problem
-# from scripts.visualize_slimevolley import setup_slimevolley  # reuse helpers
-import yaml
-import re
-from evojax.policy import MLPPolicy
 from evojax.policy.neat import NEATPolicy
+from evojax.policy import MLPPolicy
+
+
 def load_yaml(config_fname: str) -> dict:
-    """Load in YAML config file."""
+    """Load YAML config file."""
     loader = yaml.SafeLoader
     loader.add_implicit_resolver(
         "tag:yaml.org,2002:float",
@@ -64,15 +62,11 @@ def setup_slimevolley(config, max_steps: int = 3000):
         )
     return train_task, test_task, policy
 
-def setup_problem(config, logger):
-        return setup_slimevolley(config)
-########################
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--config-path")
-    parser.add_argument("--out", default="neat_topology")
     args = parser.parse_args()
 
     model_path = Path(args.model_path).resolve()
@@ -80,57 +74,90 @@ def main():
 
     cfg = yaml.safe_load(config_path.read_text())
     _, _, policy = setup_slimevolley(cfg, max_steps=cfg.get("max_steps", 3000))
-    solver = NEAT(
-        param_size=policy.num_params,
-        **cfg["es_config"],
-        seed=cfg["seed"],
-    )
+    solver = NEAT(param_size=policy.num_params, **cfg["es_config"], seed=cfg["seed"])
 
     params = np.load(model_path)["params"]
     solver.best_params = params.reshape(-1)
-    genome = solver._best_genome  # contains nodes + connections
+    genome = solver._best_genome
 
     node_arr, conn_arr = genome.to_arrays()
 
-    dot = Digraph("neat")
-    dot.attr(rankdir="TB")  # Top to bottom layout
-    
-    # Add nodes
+    # --- Graph setup ---
+    dot = Digraph("NEAT_Topology", format="png")
+    dot.attr(rankdir="LR", splines="true", concentrate="true", ranksep="2.0", nodesep="1.5")
+    dot.attr("node", shape="circle", style="filled", fontname="Helvetica", fontsize="10")
+
+    # --- Node color map ---
+    color_map = {
+        0: "lightblue",   # input
+        1: "lightgray",   # bias
+        2: "lightgreen",  # hidden
+        3: "orange",      # output
+    }
+
+    # --- Activation map ---
+    activation_map = {
+        1: "lin",
+        2: "step",
+        3: "sin",
+        4: "gauss",
+        5: "tanh",
+        6: "sigm",
+        7: "neg",
+        8: "abs",
+        9: "relu",
+        10: "cos",
+        11: "sq",
+    }
+
+    # --- Node placement by type ---
+    ranks = {"input": [], "bias": [], "hidden": [], "output": []}
     for node_id, node_type, act_id in node_arr.T:
-        label = f"{int(node_id)}\nA{int(act_id)}"
-        color = {1: "lightblue", 2: "lightgreen", 3: "orange", 4: "gray"}.get(int(node_type), "white")
-        dot.node(str(int(node_id)), label=label, style="filled", fillcolor=color)
+        node_id, node_type, act_id = int(node_id), int(node_type), int(act_id)
+        if node_type == 0:
+            ranks["input"].append(node_id)
+        elif node_type == 1:
+            ranks["bias"].append(node_id)
+        elif node_type == 2:
+            ranks["hidden"].append(node_id)
+        elif node_type == 3:
+            ranks["output"].append(node_id)
 
-    # Calculate weight range for scaling edge thickness
-    weights = conn_arr[3, conn_arr[4] >= 0.5]  # Only enabled connections
+        label = f"{activation_map.get(act_id, '')}"
+        dot.node(str(node_id), label=label, fillcolor=color_map.get(node_type, "white"))
+
+    # --- Normalize weights ---
+    enabled_mask = conn_arr[4] >= 0.5
+    weights = conn_arr[3, enabled_mask]
     if len(weights) > 0:
-        max_weight = np.max(np.abs(weights))
-        min_thickness = 0.5
-        max_thickness = 5.0
+        norm_w = (np.abs(weights) - np.min(np.abs(weights))) / (
+            np.ptp(np.abs(weights)) + 1e-9
+        )
     else:
-        max_weight = 1.0
-        min_thickness = max_thickness = 1.0
+        norm_w = np.array([])
+    w_iter = iter(norm_w)
 
-    # Add edges with thickness based on weight strength and activation function labels
+    # --- Edges ---
     for _, src, dst, weight, enabled in conn_arr.T:
         if enabled < 0.5:
             continue
-        
-        # Calculate thickness based on absolute weight
-        if max_weight > 0:
-            thickness = min_thickness + (max_thickness - min_thickness) * (abs(weight) / max_weight)
-        else:
-            thickness = min_thickness
-        
-        # Color based on weight sign
-        color = "red" if weight < 0 else "blue"
-        
-        dot.edge(str(int(src)), str(int(dst)), 
-                penwidth=str(thickness), 
-                color=color,
-                tooltip=f"Weight: {weight:+.3f}")
+        # softer thickness scaling
+        penwidth = 0.3 + 2.5 * next(w_iter, 0.5)
+        dot.edge(str(int(src)), str(int(dst)), color="black", penwidth=str(penwidth))
 
-    dot.render(args.out, format="png", cleanup=True)
+    # --- Rank organization ---
+    for rank_name, nodes in ranks.items():
+        if nodes:
+            with dot.subgraph() as s:
+                s.attr(rank="same")
+                for n in nodes:
+                    s.node(str(n))
+
+    # --- Output path (same directory as model) ---
+    out_path = model_path.parent / "neat_topology"
+    dot.render(out_path, cleanup=True)
+    print(f"Saved visualization to {out_path}.png")
+
 
 if __name__ == "__main__":
     main()
