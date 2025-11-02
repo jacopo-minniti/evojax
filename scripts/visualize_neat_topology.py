@@ -88,11 +88,11 @@ def main():
         rankdir="LR",
         splines="true",
         concentrate="true",
-        ranksep="2.8",
-        nodesep="0.8",
+        ranksep="3.4",
+        nodesep="0.6",
         pad="0.5",
     )
-    dot.attr("graph", ratio="1.3")
+    dot.attr("graph", ratio="1.6")
     dot.attr("node", shape="circle", style="filled", fontname="Helvetica", fontsize="10")
 
     # --- Node color map ---
@@ -153,8 +153,12 @@ def main():
         dot.edge(str(int(src)), str(int(dst)), color="black", penwidth=str(penwidth))
 
     # --- Rank organization ---
-    for rank_name in rank_names:
-        nodes = ranks[rank_name]
+    rank_groups = [
+        ("input_group", ranks["bias"] + ranks["input"]),
+        ("hidden", ranks["hidden"]),
+        ("output", ranks["output"]),
+    ]
+    for _, nodes in rank_groups:
         if nodes:
             with dot.subgraph() as s:
                 s.attr(rank="same")
@@ -162,7 +166,7 @@ def main():
                     s.node(str(n))
 
     # --- Enforce layer ordering left-to-right ---
-    ordered_layers = [ranks[name] for name in rank_names if ranks[name]]
+    ordered_layers = [nodes for _, nodes in rank_groups if nodes]
     for src_nodes, dst_nodes in zip(ordered_layers, ordered_layers[1:]):
         dot.edge(str(src_nodes[0]), str(dst_nodes[0]), style="invis", weight="10")
 
